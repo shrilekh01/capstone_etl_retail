@@ -1,4 +1,6 @@
 import logging
+from pathlib import Path
+
 from etl_core.config.settings import load_config
 
 # Extraction
@@ -24,6 +26,8 @@ from etl_core.loading.final_tables import (
 
 logger = logging.getLogger(__name__)
 
+BASE_DIR = Path(__file__).resolve().parents[4]
+DATA_DIR = BASE_DIR / "data"
 
 def run_daily_pipeline():
     logger.info("Starting daily ETL pipeline")
@@ -34,25 +38,29 @@ def run_daily_pipeline():
     # STEP 1: EXTRACTION
     # -------------------------------------------------
 
-    products_df = extract_file("data/products.csv")
+    products_df = extract_file(str(DATA_DIR / "products.csv"))
+
+    # --- Extract from SOURCE MySQL (retail_src) ---
 
     sales_df = extract_from_mysql(
         query="SELECT * FROM sales",
-        db_config=config.mysql,
+        db_config=config.source_mysql,
     )
 
-    stores_df = extract_from_oracle(
+    stores_df = extract_from_mysql(
         query="SELECT * FROM stores",
-        db_config=config.mysql,  # later: oracle config
+        db_config=config.source_mysql,
     )
 
     # -------------------------------------------------
     # STEP 2: STAGING
     # -------------------------------------------------
 
-    truncate_and_load(products_df, "staging_products", config.mysql)
-    truncate_and_load(sales_df, "staging_sales", config.mysql)
-    truncate_and_load(stores_df, "staging_stores", config.mysql)
+    # --- Load into DWH staging tables ---
+
+    truncate_and_load(products_df, "staging_product", config.dwh_mysql)
+    truncate_and_load(sales_df, "staging_sales", config.dwh_mysql)
+    truncate_and_load(stores_df, "staging_stores", config.dwh_mysql)
 
     # -------------------------------------------------
     # STEP 3: TRANSFORMATIONS
@@ -74,9 +82,11 @@ def run_daily_pipeline():
     # STEP 4: FINAL LOAD
     # -------------------------------------------------
 
-    load_fact_sales(sales_enriched, config.mysql)
-    load_fact_inventory(sales_enriched, config.mysql)
-    load_monthly_sales_summary(monthly_summary_df, config.mysql)
-    load_inventory_levels_by_store(inventory_summary_df, config.mysql)
+    # --- Load into DWH final tables ---
+
+    load_fact_sales(sales_enriched, config.dwh_mysql)
+    load_fact_inventory(inventory_summary_df, config.dwh_mysql)
+    load_monthly_sales_summary(monthly_summary_df, config.dwh_mysql)
+    load_inventory_levels_by_store(inventory_summary_df, config.dwh_mysql)
 
     logger.info("Daily ETL pipeline completed successfully")

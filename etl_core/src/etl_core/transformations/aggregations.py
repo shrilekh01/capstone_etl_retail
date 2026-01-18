@@ -5,7 +5,15 @@ logger = logging.getLogger(__name__)
 
 
 def monthly_sales_summary(sales_df: pd.DataFrame, date_column: str = "sale_date") -> pd.DataFrame:
+    """
+    Creates monthly sales summary:
+    Group by product_id, year, month and sum total_sales
+    """
     logger.info("Calculating monthly sales summary")
+
+    if sales_df.empty:
+        logger.warning("Sales DataFrame is empty. Returning empty monthly summary.")
+        return pd.DataFrame(columns=["product_id", "year", "month", "monthly_total_sales"])
 
     df = sales_df.copy()
     df[date_column] = pd.to_datetime(df[date_column])
@@ -23,14 +31,22 @@ def monthly_sales_summary(sales_df: pd.DataFrame, date_column: str = "sale_date"
     return summary
 
 
-def inventory_by_store(inventory_df: pd.DataFrame) -> pd.DataFrame:
+def inventory_by_store(sales_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Creates inventory (actually sales quantity) summary by store:
+    Group by store_id and sum quantity
+    """
     logger.info("Calculating inventory by store")
 
-    summary = (
-        inventory_df.groupby(["store_id"], as_index=False)["quantity_on_hand"]
+    if sales_df.empty:
+        logger.warning("Sales DataFrame is empty. Returning empty inventory summary.")
+        return pd.DataFrame(columns=["store_id", "total_inventory"])
+
+    inventory_df = (
+        sales_df.groupby(["store_id"], as_index=False)["quantity"]
         .sum()
-        .rename(columns={"quantity_on_hand": "total_inventory"})
+        .rename(columns={"quantity": "total_inventory"})
     )
 
-    logger.info(f"Inventory summary records: {len(summary)}")
-    return summary
+    logger.info(f"Inventory summary records: {len(inventory_df)}")
+    return inventory_df

@@ -1,5 +1,6 @@
 from etl_core.config.settings import load_config
 from etl_core.logging.logger import setup_logging
+from etl_core.orchestration.pipeline import run_daily_pipeline
 import logging
 
 
@@ -11,9 +12,13 @@ def main():
 
     logger.info("Starting ETL Platform")
     logger.info(f"Environment: {config.env}")
-    logger.info(f"MySQL Host: {config.mysql.host}")
+    logger.info(f"Source MySQL Host: {config.source_mysql.host}")
+    logger.info(f"DWH MySQL Host: {config.dwh_mysql.host}")
 
-    print("ETL Platform Infrastructure OK")
+    # 🚀 RUN FULL PIPELINE
+    run_daily_pipeline()
+
+    logger.info("ETL Platform run completed")
 
 
 if __name__ == "__main__":
