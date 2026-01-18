@@ -7,5 +7,5 @@ name = "etl_core"
 version = "0.1.0"
 description = "Retail ETL Core Platform"
 requires-python = ">=3.9"
-dependencies = ["pymysql", "pandas", "lxml", "oracledb"]
+dependencies = ["pymysql", "pandas", "lxml", "oracledb", "sqlalchemy"]
 
