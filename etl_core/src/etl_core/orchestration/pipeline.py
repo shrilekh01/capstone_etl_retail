@@ -45,6 +45,7 @@ def run_daily_pipeline():
     inventory_df = read_inventory_xml(str(DATA_DIR / "inventory_data.xml"))
     supplier_df = read_supplier_json(str(DATA_DIR / "supplier_data.json"))
 
+
     # --- Extract from SOURCE MySQL (retail_src) ---
 
     sales_df = extract_from_mysql(
@@ -76,10 +77,25 @@ def run_daily_pipeline():
     # Basic cleaning
     sales_df = drop_nulls(sales_df, ["sales_id", "product_id", "store_id"])
     sales_df = filter_sales_by_date(sales_df, min_date="2024-01-01")
+    print(sales_df.columns)
+
+    # -------------------------------------------------
+    # MATERIALIZE LAYER-2: intermediate_filtered_sales
+    # -------------------------------------------------
+    truncate_and_load(sales_df, "intermediate_filtered_sales", config.dwh_mysql)
 
     # Enrichment
     sales_enriched = join_sales_with_products(sales_df, products_df)
     sales_enriched = join_sales_with_stores(sales_enriched, stores_df)
+    
+    # -------------------------------------------------
+    # MATERIALIZE LAYER-2: intermediate_sales_with_details
+    # -------------------------------------------------
+    truncate_and_load(
+        sales_enriched,
+        "intermediate_sales_with_details",
+        config.dwh_mysql
+    )
 
     # Aggregations
     monthly_summary_df = monthly_sales_summary(sales_enriched)
