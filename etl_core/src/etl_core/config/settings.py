@@ -25,7 +25,7 @@ def load_config() -> AppConfig:
         host=os.getenv("SRC_MYSQL_HOST", "localhost"),
         port=int(os.getenv("SRC_MYSQL_PORT", "3306")),
         user=os.getenv("SRC_MYSQL_USER", "root"),
-        password=os.getenv("SRC_MYSQL_PASSWORD", "root"),
+        password=os.getenv("SRC_MYSQL_PASSWORD", "sunbeam"),
         database=os.getenv("SRC_MYSQL_DB", "retail_src"),
     )
 
@@ -33,7 +33,7 @@ def load_config() -> AppConfig:
         host=os.getenv("DWH_MYSQL_HOST", "localhost"),
         port=int(os.getenv("DWH_MYSQL_PORT", "3306")),
         user=os.getenv("DWH_MYSQL_USER", "root"),
-        password=os.getenv("DWH_MYSQL_PASSWORD", "root"),
+        password=os.getenv("DWH_MYSQL_PASSWORD", "sunbeam"),
         database=os.getenv("DWH_MYSQL_DB", "retaildwh"),
     )
 

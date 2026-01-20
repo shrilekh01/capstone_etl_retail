@@ -15,6 +15,9 @@ from etl_core.staging.staging_manager import truncate_and_load
 from etl_core.transformations.basic import filter_sales_by_date, drop_nulls
 from etl_core.transformations.joins import join_sales_with_products, join_sales_with_stores
 from etl_core.transformations.aggregations import monthly_sales_summary, inventory_by_store
+from etl_core.extraction.xml_inventory_reader import read_inventory_xml
+from etl_core.extraction.json_supplier_reader import read_supplier_json
+
 
 # Loading
 from etl_core.loading.final_tables import (
@@ -39,6 +42,8 @@ def run_daily_pipeline():
     # -------------------------------------------------
 
     products_df = extract_file(str(DATA_DIR / "products.csv"))
+    inventory_df = read_inventory_xml(str(DATA_DIR / "inventory_data.xml"))
+    supplier_df = read_supplier_json(str(DATA_DIR / "supplier_data.json"))
 
     # --- Extract from SOURCE MySQL (retail_src) ---
 
@@ -61,6 +66,8 @@ def run_daily_pipeline():
     truncate_and_load(products_df, "staging_product", config.dwh_mysql)
     truncate_and_load(sales_df, "staging_sales", config.dwh_mysql)
     truncate_and_load(stores_df, "staging_stores", config.dwh_mysql)
+    truncate_and_load(inventory_df, "staging_inventory", config.dwh_mysql)
+    truncate_and_load(supplier_df, "staging_supplier", config.dwh_mysql)
 
     # -------------------------------------------------
     # STEP 3: TRANSFORMATIONS

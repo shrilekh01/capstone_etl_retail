@@ -4,6 +4,7 @@ from etl_core.orchestration.pipeline import run_daily_pipeline
 import logging
 
 
+
 def main():
     setup_logging()
     logger = logging.getLogger("etl")
@@ -19,6 +20,7 @@ def main():
     run_daily_pipeline()
 
     logger.info("ETL Platform run completed")
+
 
 
 if __name__ == "__main__":
