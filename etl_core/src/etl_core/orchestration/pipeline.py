@@ -87,7 +87,7 @@ def run_daily_pipeline():
     # Enrichment
     sales_enriched = join_sales_with_products(sales_df, products_df)
     sales_enriched = join_sales_with_stores(sales_enriched, stores_df)
-    
+
     # -------------------------------------------------
     # MATERIALIZE LAYER-2: intermediate_sales_with_details
     # -------------------------------------------------
