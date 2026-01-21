@@ -1,52 +1,39 @@
 import logging
-from pathlib import Path
 
+from etl_core.config.settings import DATA_DIR
 from etl_core.config.settings import load_config
 
-# Extraction
+# ===== EXTRACTION (USE EXISTING APIS - DO NOT CHANGE) =====
 from etl_core.extraction.file_extractor import extract_file
-from etl_core.extraction.mysql_extractor import extract_from_mysql
-from etl_core.extraction.oracle_extractor import extract_from_oracle
-
-# Staging
-from etl_core.staging.staging_manager import truncate_and_load
-
-# Transformations
-from etl_core.transformations.basic import filter_sales_by_date, drop_nulls
-from etl_core.transformations.joins import join_sales_with_products, join_sales_with_stores
-from etl_core.transformations.aggregations import monthly_sales_summary, inventory_by_store
 from etl_core.extraction.xml_inventory_reader import read_inventory_xml
 from etl_core.extraction.json_supplier_reader import read_supplier_json
+from etl_core.extraction.mysql_extractor import extract_from_mysql
 
+# ===== STAGING =====
+from etl_core.staging.staging_manager import truncate_and_load
 
-# Loading
-from etl_core.loading.final_tables import (
-    load_fact_sales,
-    load_fact_inventory,
-    load_monthly_sales_summary,
-    load_inventory_levels_by_store,
-)
+# ===== TRANSFORMATIONS =====
+from etl_core.transformations.basic import drop_nulls, filter_sales_by_date
+from etl_core.transformations.joins import join_sales_with_products, join_sales_with_stores
+from etl_core.transformations.aggregations import monthly_sales_summary, inventory_by_store
+from etl_core.transformations.routing import route_by_threshold
+
+# ===== FINAL LOADERS =====
+from etl_core.loading.mysql_loader import load_dataframe
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parents[4]
-DATA_DIR = BASE_DIR / "data"
 
 def run_daily_pipeline():
     logger.info("Starting daily ETL pipeline")
 
     config = load_config()
 
-    # -------------------------------------------------
-    # STEP 1: EXTRACTION
-    # -------------------------------------------------
+    # ============================================================
+    # STEP 1: EXTRACT  (DO NOT TOUCH)
+    # ============================================================
 
     products_df = extract_file(str(DATA_DIR / "products.csv"))
-    inventory_df = read_inventory_xml(str(DATA_DIR / "inventory_data.xml"))
-    supplier_df = read_supplier_json(str(DATA_DIR / "supplier_data.json"))
-
-
-    # --- Extract from SOURCE MySQL (retail_src) ---
 
     sales_df = extract_from_mysql(
         query="SELECT * FROM sales",
@@ -58,11 +45,14 @@ def run_daily_pipeline():
         db_config=config.source_mysql,
     )
 
-    # -------------------------------------------------
-    # STEP 2: STAGING
-    # -------------------------------------------------
+    inventory_df = read_inventory_xml(str(DATA_DIR / "inventory_data.xml"))
+    supplier_df = read_supplier_json(str(DATA_DIR / "supplier_data.json"))
 
-    # --- Load into DWH staging tables ---
+
+
+    # ============================================================
+    # STEP 2: LOAD TO STAGING
+    # ============================================================
 
     truncate_and_load(products_df, "staging_product", config.dwh_mysql)
     truncate_and_load(sales_df, "staging_sales", config.dwh_mysql)
@@ -70,46 +60,82 @@ def run_daily_pipeline():
     truncate_and_load(inventory_df, "staging_inventory", config.dwh_mysql)
     truncate_and_load(supplier_df, "staging_supplier", config.dwh_mysql)
 
-    # -------------------------------------------------
-    # STEP 3: TRANSFORMATIONS
-    # -------------------------------------------------
+    # ============================================================
+    # STEP 3: LAYER 2 — INTERMEDIATE MATERIALIZATION
+    # ============================================================
 
-    # Basic cleaning
+    # 3.1 Filtered sales (Layer-2 entry point)
     sales_df = drop_nulls(sales_df, ["sales_id", "product_id", "store_id"])
     sales_df = filter_sales_by_date(sales_df, min_date="2024-01-01")
-    print(sales_df.columns)
 
-    # -------------------------------------------------
-    # MATERIALIZE LAYER-2: intermediate_filtered_sales
-    # -------------------------------------------------
-    truncate_and_load(sales_df, "intermediate_filtered_sales", config.dwh_mysql)
+    truncate_and_load(
+        sales_df,
+        "intermediate_filtered_sales",
+        config.dwh_mysql
+    )
 
-    # Enrichment
+    # 3.2 Router: high / low sales
+    high_df, low_df = route_by_threshold(
+        sales_df,
+        column="total_sales",
+        threshold=1000
+    )
+
+    truncate_and_load(high_df, "intermediate_high_sales", config.dwh_mysql)
+    truncate_and_load(low_df, "intermediate_low_sales", config.dwh_mysql)
+
+    # 3.3 Aggregation: monthly sales summary SOURCE
+    monthly_summary_source_df = monthly_sales_summary(sales_df)
+
+    truncate_and_load(
+        monthly_summary_source_df,
+        "intermediate_monthly_sales_summary_source",
+        config.dwh_mysql
+    )
+
+    # 3.4 Aggregation: inventory by store
+    inventory_agg_df = inventory_by_store(inventory_df)
+
+    truncate_and_load(
+        inventory_agg_df,
+        "intermediate_aggregated_inventory_level",
+        config.dwh_mysql
+    )
+
+    # 3.5 Enrichment join: sales + product + stores
     sales_enriched = join_sales_with_products(sales_df, products_df)
     sales_enriched = join_sales_with_stores(sales_enriched, stores_df)
 
-    # -------------------------------------------------
-    # MATERIALIZE LAYER-2: intermediate_sales_with_details
-    # -------------------------------------------------
     truncate_and_load(
         sales_enriched,
         "intermediate_sales_with_details",
         config.dwh_mysql
     )
 
-    # Aggregations
-    monthly_summary_df = monthly_sales_summary(sales_enriched)
-    inventory_summary_df = inventory_by_store(sales_enriched)
+    # ============================================================
+    # STEP 4: LAYER 3 — FINAL FACT LOADS (USING GENERIC LOADER)
+    # ============================================================
 
-    # -------------------------------------------------
-    # STEP 4: FINAL LOAD
-    # -------------------------------------------------
+    # Fact sales
+    load_dataframe(
+        sales_enriched,
+        "fact_sales",
+        config.dwh_mysql,
+        if_exists="append"  # later we will make this incremental properly
+    )
 
-    # --- Load into DWH final tables ---
+    # Inventory fact / snapshot
+    load_dataframe(
+        inventory_agg_df,
+        "inventory_levels_by_store",
+        config.dwh_mysql,
+        if_exists="replace"  # for now snapshot
+    )
 
-    load_fact_sales(sales_enriched, config.dwh_mysql)
-    load_fact_inventory(inventory_summary_df, config.dwh_mysql)
-    load_monthly_sales_summary(monthly_summary_df, config.dwh_mysql)
-    load_inventory_levels_by_store(inventory_summary_df, config.dwh_mysql)
-
-    logger.info("Daily ETL pipeline completed successfully")
+    # Monthly sales summary
+    load_dataframe(
+        monthly_summary_source_df,
+        "monthly_sales_summary",
+        config.dwh_mysql,
+        if_exists="replace"  # for now recompute
+    )

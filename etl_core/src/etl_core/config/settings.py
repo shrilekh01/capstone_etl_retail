@@ -1,5 +1,27 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
+from pathlib import Path
+
+
+
+def discover_project_root() -> Path:
+    """
+    Walk up parent directories until we find a folder that looks like
+    the project root (contains 'data' folder or docker-compose.yml).
+    """
+    current = Path(__file__).resolve()
+
+    for parent in current.parents:
+        if (parent / "data").exists() or (parent / "docker-compose.yml").exists():
+            return parent
+
+    # Fallback: old behavior (3 levels up)
+    return Path(__file__).resolve().parents[3]
+
+
+PROJECT_ROOT = discover_project_root()
+DATA_DIR = PROJECT_ROOT / "data"
 
 
 @dataclass

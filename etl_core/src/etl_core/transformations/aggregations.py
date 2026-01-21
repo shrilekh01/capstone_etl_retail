@@ -31,22 +31,23 @@ def monthly_sales_summary(sales_df: pd.DataFrame, date_column: str = "sale_date"
     return summary
 
 
-def inventory_by_store(sales_df: pd.DataFrame) -> pd.DataFrame:
+def inventory_by_store(inventory_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Creates inventory (actually sales quantity) summary by store:
-    Group by store_id and sum quantity
+    Creates inventory summary by store:
+    Group by store_id and sum quantity_on_hand
     """
     logger.info("Calculating inventory by store")
 
-    if sales_df.empty:
-        logger.warning("Sales DataFrame is empty. Returning empty inventory summary.")
+    if inventory_df.empty:
+        logger.warning("Inventory DataFrame is empty. Returning empty inventory summary.")
         return pd.DataFrame(columns=["store_id", "total_inventory"])
 
-    inventory_df = (
-        sales_df.groupby(["store_id"], as_index=False)["quantity"]
+    result_df = (
+        inventory_df.groupby(["store_id"], as_index=False)["quantity_on_hand"]
         .sum()
-        .rename(columns={"quantity": "total_inventory"})
+        .rename(columns={"quantity_on_hand": "total_inventory"})
     )
 
-    logger.info(f"Inventory summary records: {len(inventory_df)}")
-    return inventory_df
+    logger.info(f"Inventory summary records: {len(result_df)}")
+    return result_df
+
