@@ -1,13 +1,10 @@
 from etl_core.config.settings import load_config
-from etl_core.logging.logger import setup_logging
+from etl_core.logging.logger import get_logger
 from etl_core.orchestration.pipeline import run_daily_pipeline
-import logging
-
 
 
 def main():
-    setup_logging()
-    logger = logging.getLogger("etl")
+    logger = get_logger("etl")
 
     config = load_config()
 
@@ -20,7 +17,6 @@ def main():
     run_daily_pipeline()
 
     logger.info("ETL Platform run completed")
-
 
 
 if __name__ == "__main__":
