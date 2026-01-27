@@ -43,161 +43,107 @@ logger = logging.getLogger(__name__)
 
 
 def run_daily_pipeline():
-    logger.info("Starting daily ETL pipeline")
+    logger.info("Starting ETL Platform")
 
     config = load_config()
-    mysql_connector = MySQLConnector(config.dwh_mysql)
-    conn = mysql_connector.connect()
+    conn = MySQLConnector(config.dwh_mysql).connect()
+
 
     run_id = start_etl_run(conn, "retail_etl_pipeline")
 
     total_tables = 0
     total_rows = 0
+    success = False
+    error_msg = None
 
     try:
-        # =============================
-        # 1️⃣ EXTRACT
-        # =============================
-        sales_df = extract_from_mysql(
-            "SELECT * FROM sales",
-            config.source_mysql
+        # =========================
+        # FACT SALES
+        # =========================
+        sales_df = extract_from_mysql("sales", config.source_mysql)
+
+        last_sale_date = get_last_loaded_date(
+            conn,
+            table_name="fact_sales",
+            date_column="sale_date"
         )
-
-        products_df = extract_from_mysql(
-            "SELECT * FROM products",
-            config.source_mysql
-        )
-
-        stores_df = extract_from_mysql(
-            "SELECT * FROM stores",
-            config.source_mysql
-        )
-
-        # =============================
-        # 2️⃣ CLEAN
-        # =============================
-        sales_df = drop_nulls(
-            sales_df,
-            required_columns=[
-                "sales_id",
-                "product_id",
-                "store_id",
-                "sale_date",
-                "total_sales"
-            ]
-        )
-
-        # =============================
-        # 3️⃣ INCREMENTAL FILTER
-        # =============================
-        last_sale_date, last_sales_id = get_last_fact_sales_watermark(conn)
-
-        # 🔴 IMPORTANT FIX
-        sales_df["sale_date"] = pd.to_datetime(sales_df["sale_date"])
 
         if last_sale_date:
-            last_sale_ts = pd.to_datetime(last_sale_date)
+            sales_df["sale_date"] = pd.to_datetime(sales_df["sale_date"])
+            sales_df = sales_df[sales_df["sale_date"] > last_sale_date]
 
-            sales_df = sales_df[
-                (sales_df["sale_date"] > last_sale_ts)
-                | (
-                        (sales_df["sale_date"] == last_sale_ts)
-                        & (sales_df["sales_id"] > last_sales_id)
-                )
-                ]
+        sales_rows = len(sales_df)
 
-        # =============================
-        # 4️⃣ JOIN DIMENSIONS
-        # =============================
-        sales_df = join_sales_with_products(sales_df, products_df)
-        sales_df = join_sales_with_stores(sales_df, stores_df)
-
-        # =============================
-        # 5️⃣ LOAD FACT SALES
-        # =============================
-        if not sales_df.empty:
+        if sales_rows > 0:
             load_dataframe(
                 sales_df,
                 "fact_sales",
                 config.dwh_mysql,
-                if_exists="append",
+                if_exists="append"
             )
 
-            rows = len(sales_df)
-            log_table_load(conn, run_id, "fact_sales", rows, "SUCCESS")
-
-            total_tables += 1
-            total_rows += rows
-
-        # =============================
-        # 6️⃣ INVENTORY SNAPSHOT
-        # =============================
-        inventory_df = inventory_by_store(sales_df)
-
-        load_dataframe(
-            inventory_df,
-            "inventory_levels_by_store",
-            config.dwh_mysql,
-            if_exists="replace",
-        )
-
-        log_table_load(
-            conn,
-            run_id,
-            "inventory_levels_by_store",
-            len(inventory_df),
-            "SUCCESS",
-        )
-
+        log_table_load(conn, run_id, "fact_sales", sales_rows, "SUCCESS")
         total_tables += 1
-        total_rows += len(inventory_df)
+        total_rows += sales_rows
 
-        # =============================
-        # 7️⃣ MONTHLY SUMMARY
-        # =============================
-        monthly_df = monthly_sales_summary(sales_df)
-
-        load_dataframe(
-            monthly_df,
-            "monthly_sales_summary",
-            config.dwh_mysql,
-            if_exists="replace",
+        # =========================
+        # INVENTORY
+        # =========================
+        inventory_df = extract_from_mysql(
+            "intermediate_aggregated_inventory_level",
+            config.dwh_mysql
         )
 
-        log_table_load(
-            conn,
-            run_id,
-            "monthly_sales_summary",
-            len(monthly_df),
-            "SUCCESS",
-        )
+        inventory_rows = len(inventory_df)
 
+        if inventory_rows > 0:
+            load_dataframe(
+                inventory_df,
+                "inventory_levels_by_store",
+                config.dwh_mysql,
+                if_exists="replace"
+            )
+
+        log_table_load(conn, run_id, "inventory_levels_by_store", inventory_rows, "SUCCESS")
         total_tables += 1
-        total_rows += len(monthly_df)
+        total_rows += inventory_rows
 
-        # =============================
-        # 8️⃣ FINALIZE
-        # =============================
-        end_etl_run(
-            conn,
-            run_id,
-            "SUCCESS",
-            total_tables,
-            total_rows,
+        # =========================
+        # MONTHLY
+        # =========================
+        monthly_df = extract_from_mysql(
+            "intermediate_monthly_sales_summary_source",
+            config.dwh_mysql
         )
 
-        logger.info("ETL pipeline completed successfully")
+        monthly_rows = len(monthly_df)
+
+        if monthly_rows > 0:
+            load_dataframe(
+                monthly_df,
+                "monthly_sales_summary",
+                config.dwh_mysql,
+                if_exists="replace"
+            )
+
+        log_table_load(conn, run_id, "monthly_sales_summary", monthly_rows, "SUCCESS")
+        total_tables += 1
+        total_rows += monthly_rows
+
+        success = True
 
     except Exception as e:
         logger.exception("ETL pipeline failed")
+        error_msg = str(e)
 
+    finally:
         end_etl_run(
             conn,
             run_id,
-            "FAILED",
+            "SUCCESS" if success else "FAILED",
             total_tables,
             total_rows,
-            str(e),
+            error_msg
         )
-        raise
+
 
