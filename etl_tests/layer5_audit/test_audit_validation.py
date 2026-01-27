@@ -1,7 +1,6 @@
 import pytest
 from etl_core.orchestration.pipeline import run_daily_pipeline
-
-
+pytestmark = pytest.mark.integration
 # -------------------------------------------------------
 # Run ETL once before audit tests
 # -------------------------------------------------------
