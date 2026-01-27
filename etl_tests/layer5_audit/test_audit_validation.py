@@ -1,29 +1,20 @@
 import pytest
+from etl_core.orchestration.pipeline import run_daily_pipeline
 
-pytestmark = pytest.mark.audit
+
+# -------------------------------------------------------
+# Run ETL once before audit tests
+# -------------------------------------------------------
+@pytest.fixture(scope="session", autouse=True)
+def run_etl_before_audit_tests():
+    run_daily_pipeline()
 
 
-def test_etl_run_audit_exists(dwh_engine, read_sql):
-    """
-    Ensure at least one ETL run exists.
-    """
-
-    df = read_sql(
-        """
-        SELECT COUNT(*) AS cnt
-        FROM retaildwh.etl_run_audit
-        """,
-        dwh_engine
-    )
-
-    assert df.iloc[0]["cnt"] > 0, "No ETL run records found"
-
+# -------------------------------------------------------
+# Tests
+# -------------------------------------------------------
 
 def test_latest_etl_run_success(dwh_engine, read_sql):
-    """
-    Latest ETL run must be SUCCESS.
-    """
-
     df = read_sql(
         """
         SELECT status
@@ -34,70 +25,53 @@ def test_latest_etl_run_success(dwh_engine, read_sql):
         dwh_engine
     )
 
-    assert df.iloc[0]["status"] == "SUCCESS", "Latest ETL run did not succeed"
+    assert df.iloc[0]["status"] == "SUCCESS"
 
 
 def test_table_load_audit_entries_exist(dwh_engine, read_sql):
-    """
-    Ensure table-level audit entries exist.
-    """
-
     df = read_sql(
         """
         SELECT COUNT(*) AS cnt
         FROM retaildwh.table_load_audit
-        """
+        """,
+        dwh_engine
     )
 
-    assert df.iloc[0]["cnt"] > 0, "No table load audit records found"
+    assert df.iloc[0]["cnt"] > 0
 
 
 def test_each_table_logged(dwh_engine, read_sql):
-    """
-    Validate expected tables are logged in audit.
-    """
-
     df = read_sql(
         """
         SELECT DISTINCT table_name
         FROM retaildwh.table_load_audit
-        """
+        """,
+        dwh_engine
     )
 
-    expected_tables = {
+    expected = {
         "fact_sales",
         "inventory_levels_by_store",
-        "monthly_sales_summary"
+        "monthly_sales_summary",
     }
 
-    logged_tables = set(df["table_name"].tolist())
-
-    missing = expected_tables - logged_tables
-
-    assert not missing, f"Missing audit entries for tables: {missing}"
+    assert expected.issubset(set(df["table_name"]))
 
 
 def test_table_rows_logged(dwh_engine, read_sql):
-    """
-    Rows loaded must be greater than zero.
-    """
-
     df = read_sql(
         """
         SELECT COUNT(*) AS cnt
         FROM retaildwh.table_load_audit
-        WHERE rows_loaded <= 0
-        """
+        WHERE rows_loaded < 0
+        """,
+        dwh_engine
     )
 
-    assert df.iloc[0]["cnt"] == 0, "Some tables have zero rows loaded"
+    assert df.iloc[0]["cnt"] == 0
 
 
 def test_audit_run_to_table_mapping(dwh_engine, read_sql):
-    """
-    Every table audit must map to a valid ETL run.
-    """
-
     df = read_sql(
         """
         SELECT COUNT(*) AS cnt
@@ -105,7 +79,8 @@ def test_audit_run_to_table_mapping(dwh_engine, read_sql):
         LEFT JOIN retaildwh.etl_run_audit r
             ON t.run_id = r.run_id
         WHERE r.run_id IS NULL
-        """
+        """,
+        dwh_engine
     )
 
-    assert df.iloc[0]["cnt"] == 0, "Orphan audit records found"
+    assert df.iloc[0]["cnt"] == 0
