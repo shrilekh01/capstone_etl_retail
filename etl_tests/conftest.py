@@ -21,7 +21,7 @@ def pytest_collection_modifyitems(items):
                 "layer5_"
             ]):
                 item.add_marker(pytest.mark.db)
-                
+
 @pytest.fixture(scope="session")
 def source_engine():
     if IS_CI:
